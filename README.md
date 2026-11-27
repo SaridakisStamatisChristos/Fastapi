@@ -18,3 +18,5 @@ Validation errors return a detail list with location, type and message; rejected
 Database paths are resolved at app creation. Startup may create the database; subsequent requests never create a missing database. Restore a missing database from backup before restarting if data preservation is required. File-backed SQLite only. Live server smoke: `python scripts/smoke.py`.
 
 Curated mutation verification: `python scripts/mutation.py`. Runs selected baseline and mutant tests in temporary directories, writes `mutation-report.json`, and fails if any curated mutant survives. The production source is not edited.
+
+For the tested Linux Python 3.12/3.13 environment, install with `python -m pip install -r requirements-dev.txt -c constraints-linux.txt`. Constraints capture the versions observed in successful CI, not wheel hashes or a cross-platform lock. CI checks dependency consistency and verifies the tracked-file checksum manifest before upload.

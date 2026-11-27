@@ -26,3 +26,5 @@ Invalid stored task values are reported as database errors rather than silently 
 Missing stored columns and ignored updates to existing rows return 503. External schema changes and triggers are not supported as normal operation; these checks prevent misleading success or unhandled errors in those fault cases.
 
 Create and replace verify the resulting target row before committing; ignored inserts, missing resulting rows, and mismatched values return 503 and roll back. This does not certify arbitrary external triggers or unrelated side effects.
+
+Delete verifies target absence before commit. An ignored deletion or recreation of the target row returns 503 and rolls back; a nonexistent target remains 404.

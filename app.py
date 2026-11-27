@@ -129,7 +129,11 @@ def create_app(path=None):
         if not 0 < id <= 9223372036854775807:
             raise HTTPException(404, 'Task not found')
         with connection(path) as db:
-            if not db.execute('DELETE FROM tasks WHERE id=?', (id,)).rowcount:
+            cursor = db.execute('DELETE FROM tasks WHERE id=?', (id,))
+            remaining = db.execute('SELECT id FROM tasks WHERE id=?', (id,)).fetchone()
+            if remaining is not None:
+                raise HTTPException(503, 'Database unavailable')
+            if not cursor.rowcount:
                 raise HTTPException(404, 'Task not found')
     @api.exception_handler(RequestValidationError)
     async def invalid_request(request, exc):

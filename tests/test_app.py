@@ -321,3 +321,21 @@ def test_update_postcondition(tmp_path, action):
             db.execute(f'CREATE TRIGGER fault AFTER UPDATE ON tasks BEGIN {action}; END')
         assert c.put('/tasks/1',json={'title':'requested'}).status_code==503
         assert c.get('/tasks/1').json()==original
+
+@pytest.mark.parametrize('trigger', [
+    "CREATE TRIGGER fault BEFORE DELETE ON tasks BEGIN SELECT RAISE(IGNORE); END",
+    "CREATE TRIGGER fault AFTER DELETE ON tasks BEGIN INSERT INTO tasks(id,title,done) VALUES (OLD.id,'replacement',OLD.done); END",
+])
+def test_delete_postcondition(tmp_path, trigger):
+    path=str(tmp_path/'delete.db')
+    with TestClient(create_app(path)) as c:
+        original=c.post('/tasks',json={'title':'original'}).json()
+        with connection(path) as db:
+            db.execute(trigger)
+        assert c.delete('/tasks/1').status_code==503
+        assert c.get('/tasks/1').json()==original
+        assert c.delete('/tasks/999').status_code==404
+        with connection(path) as db:
+            db.execute('DROP TRIGGER fault')
+        assert c.delete('/tasks/1').status_code==204
+        assert c.get('/tasks/1').status_code==404

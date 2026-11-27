@@ -60,3 +60,29 @@ def test_rollback(tmp_path):
                 db.execute("INSERT INTO tasks(title,done) VALUES ('x',0)")
                 raise RuntimeError()
         with connection(path) as db: assert db.execute('SELECT count(*) FROM tasks').fetchone()[0]==0
+
+def test_readiness_schema_and_lock(tmp_path):
+    import sqlite3
+    path=str(tmp_path/'db')
+    with TestClient(create_app(path)) as c:
+        with connection(path) as db:
+            db.execute('DROP TABLE tasks')
+            db.execute('CREATE TABLE tasks (id INTEGER PRIMARY KEY)')
+        assert c.get('/ready').status_code==503
+        assert c.get('/health').status_code==200
+
+def test_readiness_write_lock(tmp_path):
+    path=str(tmp_path/'db')
+    with TestClient(create_app(path)) as c:
+        with connection(path) as db:
+            db.execute('BEGIN IMMEDIATE')
+            assert c.get('/ready').status_code==503
+        assert c.get('/ready').status_code==200
+        assert c.get('/tasks').json()==[]
+
+def test_unicode_validation(client):
+    from app import TaskInput
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        TaskInput(title=chr(0xd800))
+    assert client.post('/tasks',json={'title':'Ελληνικά 🌍'}).status_code==201

@@ -2,12 +2,21 @@ import os
 import sqlite3
 from contextlib import contextmanager, asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class TaskInput(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True, str_strip_whitespace=True)
     title: str = Field(min_length=1, max_length=200)
     done: bool = False
+
+    @field_validator('title')
+    @classmethod
+    def valid_unicode(cls, value):
+        try:
+            value.encode('utf-8')
+        except UnicodeEncodeError as exc:
+            raise ValueError('Title must contain valid Unicode') from exc
+        return value
 
 class Task(TaskInput):
     id: int
@@ -41,7 +50,10 @@ def create_app(path=None):
     def ready():
         try:
             with connection(path) as db:
-                db.execute('SELECT id FROM tasks LIMIT 1').fetchone()
+                db.execute('BEGIN IMMEDIATE')
+                db.execute('SELECT id, title, done FROM tasks LIMIT 1').fetchone()
+                db.execute('UPDATE tasks SET done=done WHERE 0')
+                db.rollback()
         except sqlite3.Error as exc:
             raise HTTPException(503, 'Database unavailable') from exc
         return {'status': 'ready'}

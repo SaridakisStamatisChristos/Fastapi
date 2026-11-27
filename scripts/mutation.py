@@ -18,7 +18,7 @@ MUTANTS = [
     ('wrong_update', '(body.title, body.done, id)', '(body.title, False, id)', 'test_crud'),
     ('delete_missing_success', "if not db.execute('DELETE FROM tasks WHERE id=?', (id,)).rowcount:", "if db.execute('DELETE FROM tasks WHERE id=?', (id,)).rowcount < 0:", 'test_crud'),
     ('runtime_recreate', "else '?mode=rw'", "else '?mode=rwc'", 'test_missing_database_not_recreated'),
-    ('readiness_no_lock', "db.execute('BEGIN IMMEDIATE')", "db.execute('BEGIN')", 'test_readiness_write_lock'),
+    ('readiness_read_only', "db.execute('BEGIN IMMEDIATE')\n                db.execute('SELECT id, title, done FROM tasks LIMIT 1').fetchone()\n                db.execute('UPDATE tasks SET done=done WHERE 0')", "db.execute('SELECT id, title, done FROM tasks LIMIT 1').fetchone()", 'test_readiness_write_lock'),
     ('wrong_db_status', "JSONResponse(status_code=503", "JSONResponse(status_code=500", 'test_trigger_failure_atomicity'),
     ('omit_put_contract', "@api.put('/tasks/{id}', response_model=Task, responses=DB_ERROR | VALIDATION | NOT_FOUND)", "@api.put('/tasks/{id}', response_model=Task)", 'test_openapi_error_contract'),
 ]

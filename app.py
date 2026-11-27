@@ -24,6 +24,21 @@ class TaskInput(BaseModel):
 class Task(TaskInput):
     id: int
 
+class ErrorDetail(BaseModel):
+    detail: str
+
+class ValidationIssue(BaseModel):
+    loc: list[str | int]
+    type: str
+    msg: str
+
+class ValidationFailure(BaseModel):
+    detail: list[ValidationIssue]
+
+DB_ERROR = {503: {'model': ErrorDetail}}
+VALIDATION = {422: {'model': ValidationFailure}}
+NOT_FOUND = {404: {'model': ErrorDetail}}
+
 @contextmanager
 def connection(path, *, initialize=False):
     uri = Path(path).resolve().as_uri() + ('?mode=rwc' if initialize else '?mode=rw')
@@ -50,7 +65,7 @@ def create_app(path=None):
     @api.get('/health')
     def health():
         return {'status': 'ok'}
-    @api.get('/ready')
+    @api.get('/ready', responses=DB_ERROR)
     def ready():
         try:
             with connection(path) as db:
@@ -61,16 +76,16 @@ def create_app(path=None):
         except sqlite3.Error as exc:
             raise HTTPException(503, 'Database unavailable') from exc
         return {'status': 'ready'}
-    @api.post('/tasks', response_model=Task, status_code=201)
+    @api.post('/tasks', response_model=Task, status_code=201, responses=DB_ERROR | VALIDATION)
     def create(body: TaskInput):
         with connection(path) as db:
             cursor = db.execute('INSERT INTO tasks(title,done) VALUES (?,?)', (body.title, body.done))
             return task(db.execute('SELECT * FROM tasks WHERE id=?', (cursor.lastrowid,)).fetchone())
-    @api.get('/tasks', response_model=list[Task])
+    @api.get('/tasks', response_model=list[Task], responses=DB_ERROR | VALIDATION)
     def listing(limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0, le=2147483647)):
         with connection(path) as db:
             return [task(r) for r in db.execute('SELECT * FROM tasks ORDER BY id LIMIT ? OFFSET ?', (limit, offset))]
-    @api.get('/tasks/{id}', response_model=Task)
+    @api.get('/tasks/{id}', response_model=Task, responses=DB_ERROR | VALIDATION | NOT_FOUND)
     def get(id: int):
         with connection(path) as db:
             return task(db.execute('SELECT * FROM tasks WHERE id=?', (id,)).fetchone()) if 0 < id <= 9223372036854775807 else task(None)
@@ -81,7 +96,7 @@ def create_app(path=None):
         with connection(path) as db:
             db.execute('UPDATE tasks SET title=?, done=? WHERE id=?', (body.title, body.done, id))
             return task(db.execute('SELECT * FROM tasks WHERE id=?', (id,)).fetchone())
-    @api.delete('/tasks/{id}', status_code=204)
+    @api.delete('/tasks/{id}', status_code=204, responses=DB_ERROR | VALIDATION | NOT_FOUND)
     def delete(id: int):
         if not 0 < id <= 9223372036854775807:
             raise HTTPException(404, 'Task not found')

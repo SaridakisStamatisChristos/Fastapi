@@ -211,3 +211,20 @@ def test_commit_failure_rolls_back(tmp_path):
         with connection(path) as db:
             assert db.execute('SELECT COUNT(*) FROM child').fetchone()[0]==0
         assert c.put(f"/tasks/{original['id']}",json={'title':'recovered'}).status_code==200
+
+def test_openapi_error_contract(client):
+    from app import ValidationFailure, ErrorDetail
+    schema=client.get('/openapi.json').json()
+    for path,method,codes in [
+        ('/ready','get',['503']),
+        ('/tasks','post',['422','503']),
+        ('/tasks','get',['422','503']),
+        *[('/tasks/{id}',m,['404','422','503']) for m in ['get','put','delete']],
+    ]:
+        responses=schema['paths'][path][method]['responses']
+        for code in codes:
+            expected='ValidationFailure' if code=='422' else 'ErrorDetail'
+            assert responses[code]['content']['application/json']['schema']['$ref']=='#/components/schemas/'+expected
+    ValidationFailure.model_validate(client.post('/tasks',json={}).json())
+    ErrorDetail.model_validate(client.get('/tasks/999').json())
+    assert 'content' not in schema['paths']['/tasks/{id}']['delete']['responses']['204']

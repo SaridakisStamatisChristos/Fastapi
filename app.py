@@ -89,7 +89,7 @@ def create_app(path=None):
     def get(id: int):
         with connection(path) as db:
             return task(db.execute('SELECT * FROM tasks WHERE id=?', (id,)).fetchone()) if 0 < id <= 9223372036854775807 else task(None)
-    @api.put('/tasks/{id}', response_model=Task)
+    @api.put('/tasks/{id}', response_model=Task, responses=DB_ERROR | VALIDATION | NOT_FOUND)
     def update(id: int, body: TaskInput):
         if not 0 < id <= 9223372036854775807:
             return task(None)

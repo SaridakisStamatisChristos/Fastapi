@@ -224,7 +224,24 @@ def test_openapi_error_contract(client):
         responses=schema['paths'][path][method]['responses']
         for code in codes:
             expected='ValidationFailure' if code=='422' else 'ErrorDetail'
+            assert code in responses, (path, method, code)
             assert responses[code]['content']['application/json']['schema']['$ref']=='#/components/schemas/'+expected
     ValidationFailure.model_validate(client.post('/tasks',json={}).json())
     ErrorDetail.model_validate(client.get('/tasks/999').json())
     assert 'content' not in schema['paths']['/tasks/{id}']['delete']['responses']['204']
+
+def test_put_error_response_contract(tmp_path):
+    from app import ErrorDetail, ValidationFailure
+    path=str(tmp_path/'contract.db')
+    with TestClient(create_app(path)) as c:
+        r=c.put('/tasks/999',json={'title':'valid'})
+        assert r.status_code==404
+        ErrorDetail.model_validate(r.json())
+        r=c.put('/tasks/999',json={})
+        assert r.status_code==422
+        ValidationFailure.model_validate(r.json())
+        with connection(path) as db:
+            db.execute('DROP TABLE tasks')
+        r=c.put('/tasks/999',json={'title':'valid'})
+        assert r.status_code==503
+        ErrorDetail.model_validate(r.json())

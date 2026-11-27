@@ -22,3 +22,12 @@ jobs:
         with:
           name: manifest-python-${{ matrix.python }}
           path: ${{ runner.temp }}/manifest.sha256
+
+      - name: Curated mutation gate
+        if: matrix.python == '3.13'
+        run: python scripts/mutation.py
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.python == '3.13'
+        with:
+          name: mutation-report
+          path: mutation-report.json

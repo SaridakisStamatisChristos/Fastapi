@@ -96,3 +96,20 @@ def test_unserializable_validation_input(client, raw):
     assert r.status_code == 422
     assert isinstance(r.json()['detail'], list)
     assert client.get('/tasks').json() == []
+
+def test_missing_database_not_recreated(tmp_path):
+    path = tmp_path / 'db'
+    with TestClient(create_app(str(path))) as c:
+        assert c.post('/tasks', json={'title':'keep'}).status_code == 201
+        path.rename(tmp_path / 'saved')
+        assert c.get('/ready').status_code == 503
+        assert c.get('/tasks').status_code == 503
+        assert not path.exists()
+        (tmp_path / 'saved').rename(path)
+        assert c.get('/tasks').json()[0]['title'] == 'keep'
+
+def test_special_path(tmp_path):
+    path = tmp_path / 'db?# space'
+    with TestClient(create_app(str(path))) as c:
+        assert c.post('/tasks', json={'title':'ok'}).status_code == 201
+        assert path.is_file()

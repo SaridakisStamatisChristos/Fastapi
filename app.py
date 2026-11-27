@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from pathlib import Path
 from contextlib import contextmanager, asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.exceptions import RequestValidationError
@@ -24,8 +25,9 @@ class Task(TaskInput):
     id: int
 
 @contextmanager
-def connection(path):
-    db = sqlite3.connect(path, timeout=5)
+def connection(path, *, initialize=False):
+    uri = Path(path).resolve().as_uri() + ('?mode=rwc' if initialize else '?mode=rw')
+    db = sqlite3.connect(uri, uri=True, timeout=5)
     db.row_factory = sqlite3.Row
     try:
         with db:
@@ -34,10 +36,10 @@ def connection(path):
         db.close()
 
 def create_app(path=None):
-    path = path or os.environ.get('TASK_DB', 'tasks.sqlite3')
+    path = str(Path(path or os.environ.get('TASK_DB', 'tasks.sqlite3')).resolve())
     @asynccontextmanager
     async def lifespan(app):
-        with connection(path) as db:
+        with connection(path, initialize=True) as db:
             db.execute('CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, done INTEGER NOT NULL CHECK(done IN (0,1)))')
         yield
     api = FastAPI(title='Task Service', lifespan=lifespan)

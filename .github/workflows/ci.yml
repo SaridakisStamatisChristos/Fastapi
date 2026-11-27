@@ -15,3 +15,10 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m pytest -q --cov=app --cov-branch --cov-fail-under=95
+
+      - run: python scripts/smoke.py
+      - run: git ls-files -z | xargs -0 sha256sum > "$RUNNER_TEMP/manifest.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manifest-python-${{ matrix.python }}
+          path: ${{ runner.temp }}/manifest.sha256

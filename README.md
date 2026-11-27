@@ -14,3 +14,5 @@ POST /tasks creates a task; GET /tasks lists by ascending ID with limit 1–100 
 Run tests: `python -m pytest -q --cov=app --cov-branch --cov-fail-under=95`.
 
 Validation errors return a detail list with location, type and message; rejected raw input and context are not echoed. This intentionally narrows the default FastAPI error payload to avoid serialization failures and accidental input disclosure.
+
+Database paths are resolved at app creation. Startup may create the database; subsequent requests never create a missing database. Restore a missing database from backup before restarting if data preservation is required. File-backed SQLite only. Live server smoke: `python scripts/smoke.py`.

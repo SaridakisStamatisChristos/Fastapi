@@ -339,3 +339,40 @@ def test_delete_postcondition(tmp_path, trigger):
             db.execute('DROP TRIGGER fault')
         assert c.delete('/tasks/1').status_code==204
         assert c.get('/tasks/1').status_code==404
+
+@pytest.mark.parametrize('method,path', [('post','/tasks'),('put','/tasks/1')])
+def test_body_limit(client,method,path):
+    from app import MAX_BODY_BYTES
+    original=client.post('/tasks',json={'title':'original'}).json()
+    body=b'{"title":"valid"}'
+    exact=body+b' '*(MAX_BODY_BYTES-len(body))
+    assert getattr(client,method)(path,content=exact,headers={'content-type':'application/json'}).status_code in (200,201)
+    before=client.get('/tasks').json()
+    r=getattr(client,method)(path,content=exact+b' ',headers={'content-type':'application/json'})
+    assert r.status_code==413
+    assert client.get('/tasks').json()==before
+
+def test_body_limit_asgi_chunks():
+    import asyncio
+    from app import BoundedBody, MAX_BODY_BYTES
+    async def run():
+        sent=[]
+        async def downstream(scope,receive,send):
+            raise AssertionError('oversized request reached application')
+        messages=iter([{'type':'http.request','body':b'x'*MAX_BODY_BYTES,'more_body':True},
+                       {'type':'http.request','body':b'x','more_body':False}])
+        async def receive(): return next(messages)
+        async def send(message): sent.append(message)
+        await BoundedBody(downstream)({'type':'http','method':'POST'},receive,send)
+        assert sent[0]['status']==413
+    asyncio.run(run())
+
+def test_body_disconnect():
+    import asyncio
+    from app import BoundedBody
+    async def run():
+        async def downstream(*args): raise AssertionError('disconnected request forwarded')
+        async def receive(): return {'type':'http.disconnect'}
+        async def send(message): raise AssertionError('response sent after disconnect')
+        await BoundedBody(downstream)({'type':'http','method':'POST'},receive,send)
+    asyncio.run(run())

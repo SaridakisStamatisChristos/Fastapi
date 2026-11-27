@@ -9,6 +9,7 @@ import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 MUTANTS = [
+    ('disable_body_limit', 'if len(chunks) + len(chunk) > MAX_BODY_BYTES:', 'if False:', 'test_body_limit'),
     ('allow_extra', "extra='forbid'", "extra='ignore'", 'test_invalid'),
     ('allow_empty', 'min_length=1, max_length=200', 'min_length=0, max_length=200', 'test_invalid'),
     ('allow_long', 'max_length=200', 'max_length=201', 'test_invalid'),
@@ -21,7 +22,7 @@ MUTANTS = [
     ('runtime_recreate', "else '?mode=rw'", "else '?mode=rwc'", 'test_missing_database_not_recreated'),
     ('readiness_read_only', "db.execute('BEGIN IMMEDIATE')\n                db.execute('SELECT id, title, done FROM tasks LIMIT 1').fetchone()\n                db.execute('UPDATE tasks SET done=done WHERE 0')", "db.execute('SELECT id, title, done FROM tasks LIMIT 1').fetchone()", 'test_readiness_write_lock'),
     ('wrong_db_status', "JSONResponse(status_code=503", "JSONResponse(status_code=500", 'test_trigger_failure_atomicity'),
-    ('omit_put_contract', "@api.put('/tasks/{id}', response_model=Task, responses=DB_ERROR | VALIDATION | NOT_FOUND)", "@api.put('/tasks/{id}', response_model=Task)", 'test_openapi_error_contract'),
+    ('omit_put_contract', "@api.put('/tasks/{id}', response_model=Task, responses=DB_ERROR | VALIDATION | NOT_FOUND | BODY_LIMIT)", "@api.put('/tasks/{id}', response_model=Task)", 'test_openapi_error_contract'),
 ]
 
 def main():

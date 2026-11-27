@@ -35,8 +35,39 @@ class ValidationIssue(BaseModel):
 class ValidationFailure(BaseModel):
     detail: list[ValidationIssue]
 
+MAX_BODY_BYTES = 16384
+
+class BoundedBody:
+    """Bound actual ASGI request bytes before JSON parsing."""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope['type'] != 'http' or scope['method'] not in ('POST', 'PUT'):
+            return await self.app(scope, receive, send)
+        chunks = bytearray()
+        while True:
+            message = await receive()
+            if message['type'] == 'http.disconnect':
+                return
+            chunk = message.get('body', b'')
+            if len(chunks) + len(chunk) > MAX_BODY_BYTES:
+                return await JSONResponse(status_code=413, content={'detail': 'Request body too large'})(scope, receive, send)
+            chunks.extend(chunk)
+            if not message.get('more_body', False):
+                break
+        delivered = False
+        async def replay():
+            nonlocal delivered
+            if delivered:
+                return await receive()
+            delivered = True
+            return {'type': 'http.request', 'body': bytes(chunks), 'more_body': False}
+        return await self.app(scope, replay, send)
+
 DB_ERROR = {503: {'model': ErrorDetail}}
 VALIDATION = {422: {'model': ValidationFailure}}
+BODY_LIMIT = {413: {'model': ErrorDetail}}
 NOT_FOUND = {404: {'model': ErrorDetail}}
 
 @contextmanager
@@ -58,6 +89,7 @@ def create_app(path=None):
             db.execute('CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, done INTEGER NOT NULL CHECK(done IN (0,1)))')
         yield
     api = FastAPI(title='Task Service', lifespan=lifespan)
+    api.add_middleware(BoundedBody)
     def task(row):
         if row is None:
             raise HTTPException(404, 'Task not found')
@@ -84,7 +116,7 @@ def create_app(path=None):
         except sqlite3.Error as exc:
             raise HTTPException(503, 'Database unavailable') from exc
         return {'status': 'ready'}
-    @api.post('/tasks', response_model=Task, status_code=201, responses=DB_ERROR | VALIDATION)
+    @api.post('/tasks', response_model=Task, status_code=201, responses=DB_ERROR | VALIDATION | BODY_LIMIT)
     def create(body: TaskInput):
         with connection(path) as db:
             cursor = db.execute('INSERT INTO tasks(title,done) VALUES (?,?)', (body.title, body.done))
@@ -107,7 +139,7 @@ def create_app(path=None):
             return task(None)
         with connection(path) as db:
             return task(db.execute('SELECT * FROM tasks WHERE id=?', (id,)).fetchone())
-    @api.put('/tasks/{id}', response_model=Task, responses=DB_ERROR | VALIDATION | NOT_FOUND)
+    @api.put('/tasks/{id}', response_model=Task, responses=DB_ERROR | VALIDATION | NOT_FOUND | BODY_LIMIT)
     def update(id: int, body: TaskInput):
         if not 0 < id <= 9223372036854775807:
             return task(None)

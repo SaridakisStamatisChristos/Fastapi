@@ -28,3 +28,5 @@ Missing stored columns and ignored updates to existing rows return 503. External
 Create and replace verify the resulting target row before committing; ignored inserts, missing resulting rows, and mismatched values return 503 and roll back. This does not certify arbitrary external triggers or unrelated side effects.
 
 Delete verifies target absence before commit. An ignored deletion or recreation of the target row returns 503 and rolls back; a nonexistent target remains 404.
+
+POST and PUT request bodies are limited to 16 KiB of actual ASGI body bytes (including JSON whitespace); excess returns 413 before parsing. This is a per-request application buffer limit, not a network/server concurrency or timeout guarantee.

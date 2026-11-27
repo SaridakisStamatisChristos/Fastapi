@@ -245,3 +245,25 @@ def test_put_error_response_contract(tmp_path):
         r=c.put('/tasks/999',json={'title':'valid'})
         assert r.status_code==503
         ErrorDetail.model_validate(r.json())
+
+@pytest.mark.parametrize('title,done', [('valid',2), ('  padded  ',0), ('',0), ('x'*201,0)])
+def test_corrupt_stored_task(tmp_path,title,done):
+    path=str(tmp_path/'corrupt.db')
+    with TestClient(create_app(path)) as c:
+        with connection(path) as db:
+            db.execute('PRAGMA ignore_check_constraints=ON')
+            db.execute('INSERT INTO tasks(title,done) VALUES (?,?)',(title,done))
+        assert c.get('/tasks/1').status_code==503
+        assert c.get('/tasks').status_code==503
+        assert c.get('/health').status_code==200
+        assert c.put('/tasks/1',json={'title':'repaired'}).status_code==200
+        assert c.get('/tasks/1').json()['title']=='repaired'
+
+def test_invalid_id_independent_of_database(tmp_path):
+    path=tmp_path/'db'
+    with TestClient(create_app(str(path))) as c:
+        path.unlink()
+        for method in ('get','put','delete'):
+            kwargs={'json':{'title':'valid'}} if method=='put' else {}
+            assert getattr(c,method)('/tasks/0',**kwargs).status_code==404
+        assert c.get('/tasks/1').status_code==503

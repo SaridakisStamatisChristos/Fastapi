@@ -5,7 +5,7 @@ from contextlib import contextmanager, asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, ValidationError
 
 class TaskInput(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True, str_strip_whitespace=True)
@@ -61,7 +61,15 @@ def create_app(path=None):
     def task(row):
         if row is None:
             raise HTTPException(404, 'Task not found')
-        return Task(id=row['id'], title=row['title'], done=bool(row['done']))
+        try:
+            if type(row['done']) is not int or row['done'] not in (0, 1):
+                raise ValueError('Invalid stored boolean')
+            result = Task(id=row['id'], title=row['title'], done=bool(row['done']))
+            if result.title != row['title'] or result.id <= 0:
+                raise ValueError('Invalid stored task')
+            return result
+        except (ValidationError, ValueError) as exc:
+            raise HTTPException(503, 'Database unavailable') from exc
     @api.get('/health')
     def health():
         return {'status': 'ok'}
@@ -87,8 +95,10 @@ def create_app(path=None):
             return [task(r) for r in db.execute('SELECT * FROM tasks ORDER BY id LIMIT ? OFFSET ?', (limit, offset))]
     @api.get('/tasks/{id}', response_model=Task, responses=DB_ERROR | VALIDATION | NOT_FOUND)
     def get(id: int):
+        if not 0 < id <= 9223372036854775807:
+            return task(None)
         with connection(path) as db:
-            return task(db.execute('SELECT * FROM tasks WHERE id=?', (id,)).fetchone()) if 0 < id <= 9223372036854775807 else task(None)
+            return task(db.execute('SELECT * FROM tasks WHERE id=?', (id,)).fetchone())
     @api.put('/tasks/{id}', response_model=Task, responses=DB_ERROR | VALIDATION | NOT_FOUND)
     def update(id: int, body: TaskInput):
         if not 0 < id <= 9223372036854775807:

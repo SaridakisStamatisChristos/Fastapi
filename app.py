@@ -2,6 +2,8 @@ import os
 import sqlite3
 from contextlib import contextmanager, asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class TaskInput(BaseModel):
@@ -84,9 +86,16 @@ def create_app(path=None):
         with connection(path) as db:
             if not db.execute('DELETE FROM tasks WHERE id=?', (id,)).rowcount:
                 raise HTTPException(404, 'Task not found')
+    @api.exception_handler(RequestValidationError)
+    async def invalid_request(request, exc):
+        # Do not echo arbitrary input: it can contain NaN or lone surrogates.
+        errors = []
+        for error in exc.errors():
+            loc = [part.encode('utf-8', 'backslashreplace').decode('utf-8') if isinstance(part, str) else part for part in error['loc']]
+            errors.append({'loc': loc, 'type': error['type'], 'msg': error['msg']})
+        return JSONResponse(status_code=422, content={'detail': errors})
     @api.exception_handler(sqlite3.Error)
     async def database_error(request, exc):
-        from fastapi.responses import JSONResponse
         return JSONResponse(status_code=503, content={'detail': 'Database unavailable'})
     return api
 

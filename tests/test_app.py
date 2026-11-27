@@ -86,3 +86,13 @@ def test_unicode_validation(client):
     with pytest.raises(ValidationError):
         TaskInput(title=chr(0xd800))
     assert client.post('/tasks',json={'title':'Ελληνικά 🌍'}).status_code==201
+
+@pytest.mark.parametrize('raw', [
+    b'{"title":NaN}', b'{"title":Infinity}', b'{"title":"\\ud800"}',
+    b'{"title":"valid","\\ud800":1}', b'{"title":"valid","done":NaN}',
+])
+def test_unserializable_validation_input(client, raw):
+    r = client.post('/tasks', content=raw, headers={'content-type':'application/json'})
+    assert r.status_code == 422
+    assert isinstance(r.json()['detail'], list)
+    assert client.get('/tasks').json() == []

@@ -68,7 +68,7 @@ def create_app(path=None):
             if result.title != row['title'] or result.id <= 0:
                 raise ValueError('Invalid stored task')
             return result
-        except (ValidationError, ValueError) as exc:
+        except (ValidationError, ValueError, IndexError) as exc:
             raise HTTPException(503, 'Database unavailable') from exc
     @api.get('/health')
     def health():
@@ -104,7 +104,11 @@ def create_app(path=None):
         if not 0 < id <= 9223372036854775807:
             return task(None)
         with connection(path) as db:
-            db.execute('UPDATE tasks SET title=?, done=? WHERE id=?', (body.title, body.done, id))
+            cursor = db.execute('UPDATE tasks SET title=?, done=? WHERE id=?', (body.title, body.done, id))
+            if cursor.rowcount == 0:
+                if db.execute('SELECT id FROM tasks WHERE id=?', (id,)).fetchone() is not None:
+                    raise HTTPException(503, 'Database unavailable')
+                return task(None)
             return task(db.execute('SELECT * FROM tasks WHERE id=?', (id,)).fetchone())
     @api.delete('/tasks/{id}', status_code=204, responses=DB_ERROR | VALIDATION | NOT_FOUND)
     def delete(id: int):

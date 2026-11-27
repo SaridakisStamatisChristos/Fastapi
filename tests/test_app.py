@@ -267,3 +267,27 @@ def test_invalid_id_independent_of_database(tmp_path):
             kwargs={'json':{'title':'valid'}} if method=='put' else {}
             assert getattr(c,method)('/tasks/0',**kwargs).status_code==404
         assert c.get('/tasks/1').status_code==503
+
+def test_missing_stored_column(tmp_path):
+    path=str(tmp_path/'schema.db')
+    with TestClient(create_app(path)) as c:
+        with connection(path) as db:
+            db.execute('ALTER TABLE tasks RENAME COLUMN done TO old_done')
+            db.execute("INSERT INTO tasks(title,old_done) VALUES ('existing',0)")
+        assert c.get('/tasks/1').status_code==503
+        assert c.get('/tasks').status_code==503
+        assert c.get('/ready').status_code==503
+
+def test_ignored_update_not_reported_success(tmp_path):
+    path=str(tmp_path/'ignored.db')
+    with TestClient(create_app(path)) as c:
+        original=c.post('/tasks',json={'title':'original'}).json()
+        with connection(path) as db:
+            db.execute("CREATE TRIGGER ignored BEFORE UPDATE ON tasks BEGIN SELECT RAISE(IGNORE); END")
+        r=c.put('/tasks/1',json={'title':'changed','done':True})
+        assert r.status_code==503
+        assert c.get('/tasks/1').json()==original
+        assert c.put('/tasks/999',json={'title':'missing'}).status_code==404
+        with connection(path) as db:
+            db.execute('DROP TRIGGER ignored')
+        assert c.put('/tasks/1',json={'title':'changed'}).status_code==200

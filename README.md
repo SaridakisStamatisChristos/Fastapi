@@ -24,3 +24,5 @@ For the tested Linux Python 3.12/3.13 environment, install with `python -m pip i
 Invalid stored task values are reported as database errors rather than silently normalized. Out-of-range integer IDs return 404 independently of database availability. Readiness is a schema/write probe, not a full data integrity scan.
 
 Missing stored columns and ignored updates to existing rows return 503. External schema changes and triggers are not supported as normal operation; these checks prevent misleading success or unhandled errors in those fault cases.
+
+Create and replace verify the resulting target row before committing; ignored inserts, missing resulting rows, and mismatched values return 503 and roll back. This does not certify arbitrary external triggers or unrelated side effects.

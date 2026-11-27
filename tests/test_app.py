@@ -291,3 +291,33 @@ def test_ignored_update_not_reported_success(tmp_path):
         with connection(path) as db:
             db.execute('DROP TRIGGER ignored')
         assert c.put('/tasks/1',json={'title':'changed'}).status_code==200
+
+@pytest.mark.parametrize('trigger', [
+    "CREATE TRIGGER fault BEFORE INSERT ON tasks BEGIN SELECT RAISE(IGNORE); END",
+    "CREATE TRIGGER fault AFTER INSERT ON tasks BEGIN DELETE FROM tasks WHERE id=NEW.id; END",
+    "CREATE TRIGGER fault AFTER INSERT ON tasks BEGIN UPDATE tasks SET title='wrong' WHERE id=NEW.id; END",
+])
+def test_insert_postcondition(tmp_path, trigger):
+    path=str(tmp_path/'postcondition.db')
+    with TestClient(create_app(path)) as c:
+        original=c.post('/tasks',json={'title':'original'}).json()
+        with connection(path) as db:
+            db.execute(trigger)
+        assert c.post('/tasks',json={'title':'requested'}).status_code==503
+        assert c.get('/tasks').json()==[original]
+        with connection(path) as db:
+            db.execute('DROP TRIGGER fault')
+        assert c.post('/tasks',json={'title':'requested'}).status_code==201
+
+@pytest.mark.parametrize('action', [
+    "DELETE FROM tasks WHERE id=NEW.id",
+    "UPDATE tasks SET title='wrong' WHERE id=NEW.id",
+])
+def test_update_postcondition(tmp_path, action):
+    path=str(tmp_path/'postcondition.db')
+    with TestClient(create_app(path)) as c:
+        original=c.post('/tasks',json={'title':'original'}).json()
+        with connection(path) as db:
+            db.execute(f'CREATE TRIGGER fault AFTER UPDATE ON tasks BEGIN {action}; END')
+        assert c.put('/tasks/1',json={'title':'requested'}).status_code==503
+        assert c.get('/tasks/1').json()==original

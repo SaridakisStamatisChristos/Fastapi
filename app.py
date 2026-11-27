@@ -88,7 +88,15 @@ def create_app(path=None):
     def create(body: TaskInput):
         with connection(path) as db:
             cursor = db.execute('INSERT INTO tasks(title,done) VALUES (?,?)', (body.title, body.done))
-            return task(db.execute('SELECT * FROM tasks WHERE id=?', (cursor.lastrowid,)).fetchone())
+            if cursor.rowcount != 1:
+                raise HTTPException(503, 'Database unavailable')
+            row = db.execute('SELECT * FROM tasks WHERE id=?', (cursor.lastrowid,)).fetchone()
+            if row is None:
+                raise HTTPException(503, 'Database unavailable')
+            result = task(row)
+            if result.title != body.title or result.done != body.done:
+                raise HTTPException(503, 'Database unavailable')
+            return result
     @api.get('/tasks', response_model=list[Task], responses=DB_ERROR | VALIDATION)
     def listing(limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0, le=2147483647)):
         with connection(path) as db:
@@ -109,7 +117,13 @@ def create_app(path=None):
                 if db.execute('SELECT id FROM tasks WHERE id=?', (id,)).fetchone() is not None:
                     raise HTTPException(503, 'Database unavailable')
                 return task(None)
-            return task(db.execute('SELECT * FROM tasks WHERE id=?', (id,)).fetchone())
+            row = db.execute('SELECT * FROM tasks WHERE id=?', (id,)).fetchone()
+            if row is None:
+                raise HTTPException(503, 'Database unavailable')
+            result = task(row)
+            if result.title != body.title or result.done != body.done:
+                raise HTTPException(503, 'Database unavailable')
+            return result
     @api.delete('/tasks/{id}', status_code=204, responses=DB_ERROR | VALIDATION | NOT_FOUND)
     def delete(id: int):
         if not 0 < id <= 9223372036854775807:

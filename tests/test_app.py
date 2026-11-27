@@ -113,3 +113,60 @@ def test_special_path(tmp_path):
     with TestClient(create_app(str(path))) as c:
         assert c.post('/tasks', json={'title':'ok'}).status_code == 201
         assert path.is_file()
+
+def test_concurrent_delete_single_winner(client):
+    i=client.post('/tasks',json={'title':'race'}).json()['id']
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        statuses=list(pool.map(lambda _:client.delete(f'/tasks/{i}').status_code,range(8)))
+    assert sorted(statuses)==[204]+[404]*7
+    assert client.get(f'/tasks/{i}').status_code==404
+
+def test_concurrent_replace_consistency(client):
+    i=client.post('/tasks',json={'title':'initial'}).json()['id']
+    bodies=[{'title':str(n),'done':bool(n%2)} for n in range(20)]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results=list(pool.map(lambda body:client.put(f'/tasks/{i}',json=body),bodies))
+    for body,response in zip(bodies,results):
+        assert response.status_code==200
+        assert response.json()==dict(body,id=i)
+    final=client.get(f'/tasks/{i}').json()
+    assert final in [dict(body,id=i) for body in bodies]
+
+def test_model_based_state(tmp_path):
+    import random
+    import sqlite3
+    rng=random.Random(741)
+    path=str(tmp_path/'model.db')
+    model={}
+    last_id=0
+    with TestClient(create_app(path)) as c:
+        for step in range(100):
+            op=rng.choice(['create','replace','delete','read'])
+            i=rng.randint(1,max(1,last_id+2))
+            body={'title':f'task {step}','done':bool(step%2)}
+            if op=='create':
+                r=c.post('/tasks',json=body)
+                assert r.status_code==201
+                last_id+=1
+                model[last_id]=dict(body,id=last_id)
+                assert r.json()==model[last_id]
+            elif op=='replace':
+                r=c.put(f'/tasks/{i}',json=body)
+                assert r.status_code==(200 if i in model else 404)
+                if i in model:
+                    model[i]=dict(body,id=i)
+                    assert r.json()==model[i]
+            elif op=='delete':
+                r=c.delete(f'/tasks/{i}')
+                assert r.status_code==(204 if i in model else 404)
+                model.pop(i,None)
+            else:
+                r=c.get(f'/tasks/{i}')
+                assert r.status_code==(200 if i in model else 404)
+                if i in model:
+                    assert r.json()==model[i]
+            assert c.get('/tasks').json()==list(model.values())
+        from contextlib import closing
+        with closing(sqlite3.connect(path)) as db:
+            rows=db.execute('SELECT id,title,done FROM tasks ORDER BY id').fetchall()
+        assert rows==[(v['id'],v['title'],int(v['done'])) for v in model.values()]

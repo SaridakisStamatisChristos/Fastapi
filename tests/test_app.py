@@ -170,3 +170,44 @@ def test_model_based_state(tmp_path):
         with closing(sqlite3.connect(path)) as db:
             rows=db.execute('SELECT id,title,done FROM tasks ORDER BY id').fetchall()
         assert rows==[(v['id'],v['title'],int(v['done'])) for v in model.values()]
+
+@pytest.mark.parametrize('operation', ['INSERT','UPDATE','DELETE'])
+def test_trigger_failure_atomicity(tmp_path, operation):
+    path=str(tmp_path/'fault.db')
+    with TestClient(create_app(path)) as c:
+        original=c.post('/tasks',json={'title':'original'}).json()
+        i=original['id']
+        with connection(path) as db:
+            db.execute(f"CREATE TRIGGER injected BEFORE {operation} ON tasks BEGIN SELECT RAISE(ABORT, 'injected'); END")
+        def mutate():
+            if operation=='INSERT':
+                return c.post('/tasks',json={'title':'new'})
+            if operation=='UPDATE':
+                return c.put(f'/tasks/{i}',json={'title':'changed','done':True})
+            return c.delete(f'/tasks/{i}')
+        r=mutate()
+        assert r.status_code==503
+        assert r.json()=={'detail':'Database unavailable'}
+        assert c.get('/tasks').json()==[original]
+        assert c.get('/health').status_code==200
+        with connection(path) as db:
+            db.execute('DROP TRIGGER injected')
+        assert mutate().status_code=={'INSERT':201,'UPDATE':200,'DELETE':204}[operation]
+
+def test_commit_failure_rolls_back(tmp_path):
+    import sqlite3
+    path=str(tmp_path/'commit.db')
+    with TestClient(create_app(path)) as c:
+        original=c.post('/tasks',json={'title':'original'}).json()
+        with connection(path) as db:
+            db.execute('CREATE TABLE parent (id INTEGER PRIMARY KEY)')
+            db.execute('CREATE TABLE child (id INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED)')
+        with pytest.raises(sqlite3.IntegrityError):
+            with connection(path) as db:
+                db.execute('PRAGMA foreign_keys=ON')
+                db.execute('UPDATE tasks SET title=?',('changed',))
+                db.execute('INSERT INTO child VALUES (1)')
+        assert c.get('/tasks').json()==[original]
+        with connection(path) as db:
+            assert db.execute('SELECT COUNT(*) FROM child').fetchone()[0]==0
+        assert c.put(f"/tasks/{original['id']}",json={'title':'recovered'}).status_code==200
